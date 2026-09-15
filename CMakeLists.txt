@@ -16,6 +16,8 @@ add_executable(device_server
   main.cpp
   Device.h
   Device.cpp
+  Protocol.h
+  Protocol.cpp
 )
 target_link_libraries(device_server PRIVATE
     Qt${QT_VERSION_MAJOR}::Core
