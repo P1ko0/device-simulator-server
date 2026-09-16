@@ -129,6 +129,10 @@ int main(int argc, char *argv[])
                             {
                                 device.reset();
                             }
+                            else if (command == "FAULT")
+                            {
+                                device.fault();
+                            }
                             else
                             {
                                 knownCommand = false;
