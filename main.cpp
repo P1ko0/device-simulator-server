@@ -3,6 +3,9 @@
 #include <QHostAddress>
 #include <QDebug>
 #include <QTcpSocket>
+#include <QModbusTcpServer>
+#include <QModbusDataUnit>
+#include <QVariant>
 #include <QTimer>
 #include "Device.h"
 #include "Protocol.h"
@@ -12,6 +15,60 @@ int main(int argc, char *argv[])
     QCoreApplication app(argc, argv);
 
     Device device;
+
+    QModbusTcpServer modbusServer;
+
+    // 定义输入寄存器：从地址0开始，共3个
+    QModbusDataUnit inputRegisters(
+        QModbusDataUnit::InputRegisters,
+        0,
+        3
+        );
+
+    QModbusDataUnitMap registerMap;
+    registerMap.insert(
+        QModbusDataUnit::InputRegisters,
+        inputRegisters
+        );
+
+    if (!modbusServer.setMap(registerMap))
+    {
+        qCritical() << "Modbus register map setup failed";
+        return 1;
+    }
+
+    // 设置固定测试值
+    inputRegisters.setValue(0, 2200);
+    inputRegisters.setValue(1, 30);
+    inputRegisters.setValue(2, 2);
+
+    if (!modbusServer.setData(inputRegisters))
+    {
+        qCritical() << "Modbus test data setup failed";
+        return 1;
+    }
+
+    // 设置监听地址、端口和设备编号
+    modbusServer.setConnectionParameter(
+        QModbusDevice::NetworkAddressParameter,
+        QStringLiteral("127.0.0.1")
+        );
+
+    modbusServer.setConnectionParameter(
+        QModbusDevice::NetworkPortParameter,
+        1502
+        );
+
+    modbusServer.setServerAddress(1);
+
+    if (!modbusServer.connectDevice())
+    {
+        qCritical() << "Modbus server start failed:"
+                    << modbusServer.errorString();
+        return 1;
+    }
+
+    qInfo() << "Modbus server listening on 127.0.0.1:1502";
 
     QTcpServer server;
 
