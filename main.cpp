@@ -18,6 +18,13 @@ int main(int argc, char *argv[])
 
     QModbusTcpServer modbusServer;
 
+    // 定义保持寄存器
+    QModbusDataUnit holdingRegisters(
+        QModbusDataUnit::HoldingRegisters,
+        0,
+        2
+        );
+
     // 定义输入寄存器：从地址0开始，共3个
     QModbusDataUnit inputRegisters(
         QModbusDataUnit::InputRegisters,
@@ -25,10 +32,28 @@ int main(int argc, char *argv[])
         3
         );
 
+    // 定义线圈
+    QModbusDataUnit coils(
+        QModbusDataUnit::Coils,
+        0,
+        1
+        );
+
     QModbusDataUnitMap registerMap;
+
     registerMap.insert(
         QModbusDataUnit::InputRegisters,
         inputRegisters
+        );
+
+    registerMap.insert(
+        QModbusDataUnit::HoldingRegisters,
+        holdingRegisters
+        );
+
+    registerMap.insert(
+        QModbusDataUnit::Coils,
+        coils
         );
 
     if (!modbusServer.setMap(registerMap))
@@ -37,16 +62,99 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    //设定保持寄存器测试值
+    holdingRegisters.setValue(0, 1800);
+    holdingRegisters.setValue(1, 60);
+
     // 设置固定测试值
     inputRegisters.setValue(0, 2200);
     inputRegisters.setValue(1, 30);
     inputRegisters.setValue(2, 2);
+
+    if(!modbusServer.setData(holdingRegisters))
+    {
+        qCritical() << "保持寄存器初始化失败";
+        return 1;
+    }
 
     if (!modbusServer.setData(inputRegisters))
     {
         qCritical() << "Modbus test data setup failed";
         return 1;
     }
+
+    auto syncModbusStatus = [&modbusServer, &device]
+    {
+        auto status = device.getStatus();
+        quint16 statusCode = 0;
+
+        if(status == "idle")
+        {
+            statusCode = 0;
+        }
+        else if(status == "running")
+        {
+            statusCode = 1;
+        }
+        else if(status == "stopped")
+        {
+            statusCode = 2;
+        }
+        else if(status == "error")
+        {
+            statusCode = 3;
+        }
+        else
+        {
+            qWarning() << "未知设备状态";
+            return;
+        }
+
+        if(!modbusServer.setData(QModbusDataUnit::InputRegisters,2,statusCode))
+        {
+            qWarning() << "同步设备状态失败";
+            return;
+        }
+    };
+
+    syncModbusStatus();
+
+    QObject::connect(
+        &modbusServer,
+        &QModbusServer::dataWritten,
+        &app,
+        [&device, &modbusServer, &syncModbusStatus](QModbusDataUnit::RegisterType table, int address, int size)
+        {
+            if(table != QModbusDataUnit::Coils || address != 0 ||size != 1)
+            {
+                return;
+            }
+            else
+            {
+                quint16 coilValue = 0;
+                if(!modbusServer.data(QModbusDataUnit::Coils,0,&coilValue))
+                {
+                    qWarning() << "读取启动线圈失败";
+                    return;
+                }
+                if(!coilValue)
+                {
+                    return;
+                }
+                else
+                {
+                    device.start();
+
+                    syncModbusStatus();
+
+                    if(!modbusServer.setData(QModbusDataUnit::Coils, 0, 0))
+                    {
+                        qWarning() << "启动线圈清零失败";
+                    }
+                }
+            }
+        }
+        );
 
     // 设置监听地址、端口和设备编号
     modbusServer.setConnectionParameter(
@@ -76,7 +184,7 @@ int main(int argc, char *argv[])
         &server,
         &QTcpServer::newConnection,
         &app,
-        [&server, &device]
+        [&server, &device, &syncModbusStatus]
         {
             QTcpSocket *client = server.nextPendingConnection();
 
@@ -91,7 +199,7 @@ int main(int argc, char *argv[])
                 client,
                 &QTcpSocket::readyRead,
                 client,
-                [client, &device]
+                [client, &device, &syncModbusStatus]
                 {
                     while (client->canReadLine())
                     {
@@ -194,6 +302,8 @@ int main(int argc, char *argv[])
                             {
                                 knownCommand = false;
                             }
+
+                            syncModbusStatus();
 
                             QString status =
                                 QString::fromStdString(device.getStatus());
